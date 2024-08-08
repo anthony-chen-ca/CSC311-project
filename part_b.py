@@ -120,7 +120,7 @@ def weighted_knn_impute(matrix, similarity_matrix, valid_data, k, transposed=Fal
 
 def knn_impute_by_user(matrix, valid_data, k):
     """Fill in the missing values using k-Nearest Neighbors based on
-    student similarity. Return the accuracy on valid_data.
+    student similarity. Return the imputed matrix and accuracy on valid_data.
 
     See https://scikit-learn.org/stable/modules/generated/sklearn.impute.KNNImputer.html for details.
 
@@ -128,7 +128,7 @@ def knn_impute_by_user(matrix, valid_data, k):
     :param valid_data: A dictionary {user_id: list, question_id: list,
     is_correct: list}
     :param k: int
-    :return: float
+    :return: 2D imputed matrix and float
     """
     nbrs = KNNImputer(n_neighbors=k)
     # We use NaN-Euclidean distance measure.
@@ -139,13 +139,13 @@ def knn_impute_by_user(matrix, valid_data, k):
 
 def knn_impute_by_item(matrix, valid_data, k):
     """Fill in the missing values using k-Nearest Neighbors based on
-    question similarity. Return the accuracy on valid_data.
+    question similarity. Return the imputed matrix and accuracy on valid_data.
 
     :param matrix: 2D sparse matrix
     :param valid_data: A dictionary {user_id: list, question_id: list,
     is_correct: list}
     :param k: int
-    :return: float
+    :return: 2D imputed matrix and float
     """
     transposed_matrix = matrix.T
     nbrs = KNNImputer(n_neighbors=k)
@@ -198,10 +198,14 @@ def tune_user_k(sparse_matrix, val_data, student_similarity_matrix, question_sim
     """Return the best user k.
     """
 
+    baseline_accuracies = []
     hybrid_accuracies = []
     hybrid_weighted_accuracies = []
     for user_k in user_k_values:
-        print(f"Now running Hybrid KNN with user_k={user_k}:")
+        print(f"First running baseline KNN with user_k={user_k}:")
+        baseline_accuracy = knn_impute_by_user(sparse_matrix, val_data, user_k)[1]
+        baseline_accuracies.append(baseline_accuracy)
+        print(f"Complete. Now running Hybrid KNN with user_k={user_k}:")
         hybrid_accuracy = hybrid_knn_impute(sparse_matrix, val_data, user_k, best_item_k, best_alpha)
         hybrid_accuracies.append(hybrid_accuracy)
         print(f"Complete. Now running Hybrid Weighted KNN with user_k={user_k}:")
@@ -211,6 +215,19 @@ def tune_user_k(sparse_matrix, val_data, student_similarity_matrix, question_sim
         hybrid_weighted_accuracies.append(hybrid_weighted_accuracy)
     best_user_k = user_k_values[np.argmax(hybrid_weighted_accuracies)]
     print(f"Best user_k: {best_user_k}")
+
+    # Plot the accuracies
+    plt.plot(user_k_values, baseline_accuracies, marker='o', color='green', label='Baseline Accuracy')
+    plt.plot(user_k_values, hybrid_accuracies, marker='o', color='blue', label='Hybrid Accuracy')
+    plt.plot(user_k_values, hybrid_weighted_accuracies, marker='o', color='red', label='Hybrid Weighted Accuracy')
+    plt.xlabel("user_k")
+    plt.ylabel("Validation Accuracy")
+    plt.title("Validation Accuracy vs. user_k")
+    plt.legend()
+    plt.grid(True)
+    plt.savefig("knn-user-tuning.png")
+    plt.clf()
+
     return best_user_k
 
 
@@ -232,6 +249,18 @@ def tune_item_k(sparse_matrix, val_data, student_similarity_matrix, question_sim
         hybrid_weighted_accuracies.append(hybrid_weighted_accuracy)
     best_item_k = item_k_values[np.argmax(hybrid_weighted_accuracies)]
     print(f"Best item_k: {best_item_k}")
+
+    # Plot the accuracies
+    plt.plot(item_k_values, hybrid_accuracies, marker='o', color='blue', label='Hybrid Accuracy')
+    plt.plot(item_k_values, hybrid_weighted_accuracies, marker='o', color='red', label='Hybrid Weighted Accuracy')
+    plt.xlabel("item_k")
+    plt.ylabel("Validation Accuracy")
+    plt.title("Validation Accuracy vs. item_k")
+    plt.legend()
+    plt.grid(True)
+    plt.savefig("knn-item-tuning.png")
+    plt.clf()
+
     return best_item_k
 
 
@@ -254,14 +283,26 @@ def tune_alpha(sparse_matrix, val_data, student_similarity_matrix, question_simi
     best_alpha = alpha_values[np.argmax(hybrid_weighted_accuracies)]
     print(f"Best alpha: {best_alpha}")
 
-    # Plot the hybrid validation accuracy as a function of alpha
-    # plt.plot(alpha_values, hybrid_accuracies, marker='o')
-    # plt.xlabel("alpha")
-    # plt.ylabel("Validation Accuracy")
-    # plt.title("Hybrid Validation Accuracy vs. alpha")
-    # plt.savefig("knn-hybrid.png")
+    # Plot the accuracies
+    plt.plot(alpha_values, hybrid_accuracies, marker='o', color='blue', label='Hybrid Accuracy')
+    plt.plot(alpha_values, hybrid_weighted_accuracies, marker='o', color='red', label='Hybrid Weighted Accuracy')
+    plt.xlabel("alpha")
+    plt.ylabel("Validation Accuracy")
+    plt.title("Validation Accuracy vs. alpha")
+    plt.legend()
+    plt.grid(True)
+    plt.savefig("knn-alpha-tuning.png")
+    plt.clf()
 
     return best_alpha
+
+
+def get_potential_values(center, num_elements, spacing):
+    """Generate a positive centered list for hyperparameter testing.
+    """
+    start = center - (num_elements // 2) * spacing
+    generated_list = [start + i * spacing for i in range(num_elements)]
+    return [num for num in generated_list if num > 0]
 
 
 def main():
@@ -288,12 +329,12 @@ def main():
     student_similarity_matrix, question_similarity_matrix = compute_similarity_matrices(student_meta, question_meta)
 
     # Hyperparameters
-    user_k_values = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21]
     best_user_k = 7
-    item_k_values = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21]
-    best_item_k = 21
-    alpha_values = [0.1, 0.3, 0.5, 0.7, 0.9]
+    user_k_values = get_potential_values(best_user_k, 5, 2)
+    best_item_k = 23
+    item_k_values = get_potential_values(best_item_k, 5, 2)
     best_alpha = 0.1
+    alpha_values = [0.1, 0.3, 0.5, 0.7, 0.9]
 
     # # user_k tuning
     # best_user_k = tune_user_k(sparse_matrix, val_data, student_similarity_matrix, question_similarity_matrix,
@@ -311,20 +352,23 @@ def main():
     print(f"Best user_k: {best_user_k}")
     print(f"Best item_k: {best_item_k}")
     print(f"Best alpha: {best_alpha}")
+    final_baseline_test_accuracy = knn_impute_by_user(sparse_matrix, test_data, best_user_k)[1]
     final_hybrid_test_accuracy = hybrid_knn_impute(sparse_matrix, test_data, best_user_k, best_item_k, best_alpha)
     final_weighted_test_accuracy = hybrid_weighted_knn_impute(sparse_matrix, test_data, student_similarity_matrix,
                                                               question_similarity_matrix,
                                                               best_user_k, best_item_k, best_alpha)
+    print(f"FINAL BASELINE TEST ACCURACY: {final_baseline_test_accuracy}")
     print(f"FINAL HYBRID TEST ACCURACY: {final_hybrid_test_accuracy}")
     print(f"FINAL HYBRID WEIGHTED TEST ACCURACY: {final_weighted_test_accuracy}")
 
     """
     PAST RESULTS:
     Best user_k: 7
-    Best item_k: 21
+    Best item_k: 23
     Best alpha: 0.1
-    FINAL HYBRID TEST ACCURACY: 0.6892464013547841
-    FINAL HYBRID WEIGHTED TEST ACCURACY: 0.6788032740615297
+    FINAL BASELINE TEST ACCURACY: 0.6852949477843635
+    FINAL HYBRID TEST ACCURACY: 0.6889641546711827
+    FINAL HYBRID WEIGHTED TEST ACCURACY: 0.6773920406435224
     """
 
     end_time = time.time()
