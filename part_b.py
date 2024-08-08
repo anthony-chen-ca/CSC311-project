@@ -73,13 +73,23 @@ def weight_function(distances, similarity_matrix, indices):
     for i, neighbors in enumerate(indices):
         for j, neighbor in enumerate(neighbors):
             weights[i, j] = similarity_matrix[i, neighbor]
+    # Normalize weights to ensure they sum to 1 for each row
+    weights = weights / weights.sum(axis=1, keepdims=True)
     return weights
 
 
-def preprocess_matrix(matrix):
+def custom_weights(d, weights):
+    """Custom weight function built for KNNImputer.
+    """
+    sorted_indices = np.argsort(d, axis=1)
+    row_indices = np.arange(len(d))[:, None]
+    return weights[row_indices, sorted_indices]
+
+
+def preprocess_matrix(matrix, k):
     """Imputes NaN values using a very basic KNNImputer, so we can use NearestNeighbors.
     """
-    imputer = KNNImputer(n_neighbors=5)
+    imputer = KNNImputer(n_neighbors=k)
     return imputer.fit_transform(matrix)
 
 
@@ -92,18 +102,16 @@ def weighted_knn_impute(matrix, similarity_matrix, valid_data, k, transposed=Fal
     """
     if transposed:
         matrix = matrix.T
-    matrix = preprocess_matrix(matrix)
+    preprocessed_matrix = preprocess_matrix(matrix, k)
     nbrs = NearestNeighbors(n_neighbors=k)
-    nbrs.fit(matrix)
+    nbrs.fit(preprocessed_matrix)
     # Get the distances and indices of the k nearest neighbors
-    distances, indices = nbrs.kneighbors(matrix, return_distance=True)
-
-    # Adjust weights using metadata similarity
-    weights = weight_function(distances, similarity_matrix, indices)
+    distances, indices = nbrs.kneighbors(preprocessed_matrix, return_distance=True)
 
     # Perform KNN Imputation with custom weights
-    weighted_nbrs = KNNImputer(n_neighbors=k, weights=lambda d: weights)
-    imputed_matrix = weighted_nbrs.fit_transform(matrix)
+    weights = weight_function(distances, similarity_matrix, indices)
+    weighted_nbrs = KNNImputer(n_neighbors=k, weights=lambda d: custom_weights(d, weights))
+    imputed_matrix = weighted_nbrs.fit_transform(matrix)  # original matrix
     if transposed:
         imputed_matrix = imputed_matrix.T
     acc = sparse_matrix_evaluate(valid_data, imputed_matrix)
@@ -280,23 +288,23 @@ def main():
     student_similarity_matrix, question_similarity_matrix = compute_similarity_matrices(student_meta, question_meta)
 
     # Hyperparameters
-    user_k_values = [3, 5, 7, 9, 11, 13, 15, 17, 19, 21]
-    best_user_k = 3
-    item_k_values = [3, 5, 7, 9, 11, 13, 15, 17, 19, 21]
-    best_item_k = 3
+    user_k_values = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21]
+    best_user_k = 7
+    item_k_values = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21]
+    best_item_k = 21
     alpha_values = [0.1, 0.3, 0.5, 0.7, 0.9]
-    best_alpha = 0.7
+    best_alpha = 0.1
 
-    # user_k tuning
-    best_user_k = tune_user_k(sparse_matrix, val_data, student_similarity_matrix, question_similarity_matrix,
-                              user_k_values, best_item_k, best_alpha)
-
-    # item_k tuning
-    best_item_k = tune_item_k(sparse_matrix, val_data, student_similarity_matrix, question_similarity_matrix,
-                              best_user_k, item_k_values, best_alpha)
-    # Alpha tuning
-    best_alpha = tune_alpha(sparse_matrix, val_data, student_similarity_matrix, question_similarity_matrix,
-                            best_user_k, best_item_k, alpha_values)
+    # # user_k tuning
+    # best_user_k = tune_user_k(sparse_matrix, val_data, student_similarity_matrix, question_similarity_matrix,
+    #                           user_k_values, best_item_k, best_alpha)
+    #
+    # # item_k tuning
+    # best_item_k = tune_item_k(sparse_matrix, val_data, student_similarity_matrix, question_similarity_matrix,
+    #                           best_user_k, item_k_values, best_alpha)
+    # # Alpha tuning
+    # best_alpha = tune_alpha(sparse_matrix, val_data, student_similarity_matrix, question_similarity_matrix,
+    #                         best_user_k, best_item_k, alpha_values)
 
     # Final evaluation on test set
     print("Hyperparameters:")
@@ -312,11 +320,11 @@ def main():
 
     """
     PAST RESULTS:
-    Best user_k: 3
-    Best item_k: 3
-    Best alpha: 0.7
-    FINAL HYBRID TEST ACCURACY: 0.6646909398814564
-    FINAL HYBRID WEIGHTED TEST ACCURACY: 0.6830369743155518
+    Best user_k: 7
+    Best item_k: 21
+    Best alpha: 0.1
+    FINAL HYBRID TEST ACCURACY: 0.6892464013547841
+    FINAL HYBRID WEIGHTED TEST ACCURACY: 0.6788032740615297
     """
 
     end_time = time.time()
